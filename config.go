@@ -20,6 +20,7 @@ type Config struct {
 	Lists       []string `json:"lists"`       // multi-list mode: collections merged into one mirror
 	DefaultList string   `json:"defaultList"` // where tasks without a +list tag go
 	AutoList    bool     `json:"autoList"`    // create a list per tag on the fly
+	Excludes    []string `json:"excludes"`    // slugs of collections the mirror must ignore
 	TodoFile    string   `json:"todoFile"`    // mirror file the widget reads
 	StateDir    string   `json:"stateDir"`    // sidecar + lock directory
 	Interval    int      `json:"interval"`    // daemon poll seconds
@@ -194,6 +195,15 @@ func initConfig(rest []string) error {
 	if s, _ := get("--interval"); s != "" {
 		if _, e := fmt.Sscanf(s, "%d", &c.Interval); e != nil || c.Interval <= 0 {
 			return fmt.Errorf("bad --interval %q", s)
+		}
+	}
+	for i := 0; i < len(rest); i++ {
+		if rest[i] == "--exclude" && i+1 < len(rest) {
+			for _, n := range strings.Split(rest[i+1], ",") {
+				if n = strings.TrimSpace(n); n != "" {
+					c.Excludes = append(c.Excludes, n)
+				}
+			}
 		}
 	}
 	noAuto, _ := get("--no-auto-list")

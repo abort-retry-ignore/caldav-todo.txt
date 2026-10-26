@@ -56,6 +56,9 @@ func normalizeTags(c *Config, cl *Client, items []item) ([]item, int, error) {
 	for _, s := range colSlugs(cl.cols) {
 		known[strings.ToLower(s)] = true
 	}
+	for _, e := range c.Excludes {
+		known[strings.ToLower(e)] = true // never auto-create an excluded list
+	}
 	created := 0
 	moved := 0
 	var createdNames []string

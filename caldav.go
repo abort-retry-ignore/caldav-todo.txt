@@ -43,6 +43,16 @@ func newClient(c *Config) (*Client, error) {
 	if derr := cl.discover(); derr != nil {
 		fmt.Fprintf(stderr(), "tuxedodav: collection discovery: %v (using configured lists only)\n", derr)
 	}
+	if len(c.Excludes) > 0 {
+		var kept []Collection
+		for _, col := range cl.cols {
+			if c.excluded(col.Slug) {
+				continue
+			}
+			kept = append(kept, col)
+		}
+		cl.cols = kept
+	}
 	return cl, nil
 }
 
@@ -264,6 +274,17 @@ func (cl *Client) colBySlugFold(slug string) (Collection, bool) {
 		}
 	}
 	return Collection{}, false
+}
+
+// excluded reports whether a slug is on the config's exclusion list
+// (case-insensitive).
+func (c *Config) excluded(slug string) bool {
+	for _, e := range c.Excludes {
+		if strings.EqualFold(strings.TrimSpace(e), slug) {
+			return true
+		}
+	}
+	return false
 }
 
 // discover PROPFINDs the account's calendar home and registers every calendar
