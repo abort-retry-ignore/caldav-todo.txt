@@ -16,10 +16,9 @@ func doctor() error {
 	if err != nil {
 		return err
 	}
-	cols, _ := c.collections()
 	fmt.Printf("doctor: lists = %v (default: %s)\n", colSlugs(cl.cols), cl.defaultCol().Slug)
 
-	for _, col := range cols {
+	for _, col := range cl.cols {
 		items, err := cl.reportCol(col)
 		if err != nil {
 			return fmt.Errorf("REPORT %s failed: %w", col.Name, err)

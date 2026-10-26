@@ -314,7 +314,7 @@ func (cl *Client) discover() error {
 		if !isCal {
 			continue
 		}
-		href := origin(r.Href) + r.Href
+		href := root + r.Href
 		seg := strings.TrimSuffix(r.Href, "/")
 		if i := strings.LastIndex(seg, "/"); i >= 0 {
 			seg = seg[i+1:]
