@@ -123,7 +123,7 @@ func normalizeTags(c *Config, cl *Client, items []item) ([]item, int, error) {
 // mkCol creates a VTODO-only calendar collection via MKCALENDAR.
 func (cl *Client) mkCol(name string) (Collection, error) {
 	body := `<?xml version="1.0" encoding="utf-8"?>
-<mkcalendar xmlns="urn:ietf:params:xml:ns:caldav" xmlns:d="DAV:">
+<mkcalendar xmlns="urn:ietf:params:xml:ns:caldav" xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
  <set>
   <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
   <c:supported-calendar-component-set><c:comp name="VTODO"/></c:supported-calendar-component-set>
