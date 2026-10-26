@@ -56,6 +56,15 @@ func readMirror(path string) (string, error) {
 }
 
 func writeIfChanged(path, content string) (bool, error) {
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return false, err
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
 	cur, err := readMirror(path)
 	if err != nil {
 		return false, err

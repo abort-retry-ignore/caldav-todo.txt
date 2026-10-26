@@ -354,7 +354,7 @@ func writeICS(t VTodo) string {
 	b.WriteString(propString("UID", t.Uid, ""))
 	b.WriteString("DTSTAMP:" + time.Now().UTC().Format(timeLayoutICS) + "\r\n")
 	if t.Created != "" {
-		b.WriteString(propString("CREATED", t.Created, "VALUE=DATE"))
+		b.WriteString(propString("CREATED", strings.ReplaceAll(t.Created, "-", "")+"T000000Z", ""))
 	}
 	b.WriteString(propString("SUMMARY", t.Summary, ""))
 	if t.Priority > 0 {
