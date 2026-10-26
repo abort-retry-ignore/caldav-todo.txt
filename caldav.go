@@ -16,6 +16,7 @@ type Client struct {
 	defaultSlug string
 	username    string
 	password    string
+	userPath    string // /remote.php/dav/calendars/<user>/
 	http        *http.Client
 }
 
@@ -35,8 +36,14 @@ func newClient(c *Config) (*Client, error) {
 			break
 		}
 	}
-	return &Client{cols: cols, defaultSlug: def, username: c.Username, password: c.Password,
-		http: &http.Client{Timeout: 30 * time.Second}}, nil
+	cl := &Client{cols: cols, defaultSlug: def, username: c.Username, password: c.Password,
+		http: &http.Client{Timeout: 30 * time.Second}, userPath: fmt.Sprintf("/remote.php/dav/calendars/%s/", c.Username)}
+	// Discovery: include every VTODO-capable calendar in the account, not just
+	// the ones named in the config — newly created lists never fall out of view.
+	if derr := cl.discover(); derr != nil {
+		fmt.Fprintf(stderr(), "tuxedodav: collection discovery: %v (using configured lists only)\n", derr)
+	}
+	return cl, nil
 }
 
 func (cl *Client) colBySlug(slug string) (Collection, error) {
@@ -257,4 +264,79 @@ func (cl *Client) colBySlugFold(slug string) (Collection, bool) {
 		}
 	}
 	return Collection{}, false
+}
+
+// discover PROPFINDs the account's calendar home and registers every calendar
+// collection not already known. Best-effort: failures leave the configured set.
+func (cl *Client) discover() error {
+	if len(cl.cols) == 0 {
+		return fmt.Errorf("no base collection")
+	}
+	root := origin(cl.cols[0].URL)
+	body := `<?xml version="1.0"?>
+<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>`
+	data, status, err := cl.do("PROPFIND", root+cl.userPath, body, map[string]string{"Depth": "1"})
+	if err != nil {
+		return err
+	}
+	if status != http.StatusMultiStatus {
+		return fmt.Errorf("HTTP %d", status)
+	}
+	var ms struct {
+		Responses []struct {
+			Href     string `xml:"href"`
+			Propstat []struct {
+				Status string `xml:"status"`
+				Prop   struct {
+					Displayname  string     `xml:"displayname"`
+					CalendarFlag []struct{} `xml:"resourcetype>calendar"`
+				} `xml:"prop"`
+			} `xml:"propstat"`
+		} `xml:"response"`
+	}
+	if err := xml.Unmarshal(data, &ms); err != nil {
+		return err
+	}
+	added := 0
+	for _, r := range ms.Responses {
+		isCal, name := false, ""
+		for _, ps := range r.Propstat {
+			if !strings.Contains(ps.Status, "200") {
+				continue
+			}
+			if len(ps.Prop.CalendarFlag) > 0 {
+				isCal = true
+				if n := strings.TrimSpace(ps.Prop.Displayname); n != "" {
+					name = n
+				}
+			}
+		}
+		if !isCal {
+			continue
+		}
+		href := origin(r.Href) + r.Href
+		seg := strings.TrimSuffix(r.Href, "/")
+		if i := strings.LastIndex(seg, "/"); i >= 0 {
+			seg = seg[i+1:]
+		}
+		if name == "" {
+			name = seg
+		}
+		col := Collection{Name: name, Slug: slugify(name), URL: strings.TrimSuffix(href, "/") + "/"}
+		exists := false
+		for _, e := range cl.cols {
+			if strings.EqualFold(e.Slug, col.Slug) {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			cl.addCol(col)
+			added++
+		}
+	}
+	if added > 0 {
+		fmt.Fprintf(stderr(), "tuxedodav: discovered %d additional list(s): %s\n", added, strings.Join(colSlugs(cl.cols), ","))
+	}
+	return nil
 }
