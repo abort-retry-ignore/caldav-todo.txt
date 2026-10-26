@@ -248,3 +248,13 @@ func (cl *Client) slugSet() map[string]bool {
 	}
 	return set
 }
+
+// colBySlugFold finds a collection by case-insensitive slug.
+func (cl *Client) colBySlugFold(slug string) (Collection, bool) {
+	for _, col := range cl.cols {
+		if strings.EqualFold(col.Slug, slug) {
+			return col, true
+		}
+	}
+	return Collection{}, false
+}

@@ -23,6 +23,26 @@ omarchy widget (stock QML, one-string patch)
 - Line numbers map to tasks through a sidecar (`~/.local/state/tuxedodav/uids.json`),
   refreshed every pull under a flock shared with the daemon.
 
+## Multi-list mode (v2)
+
+Nextcloud keeps several lists (each shows as a Reminders list on phones), while
+the tuxedo mirror merges **all configured lists into one todo.txt**. Each task
+line carries its source list as a `+List` tag (spaces become `_`):
+
+```
+(A) 2026-10-26 buy oat milk +shopping due:2026-11-03
+tidy desk @home +todo
+```
+
+- Routing: a `+List` token on an `add`/`replace` line chooses the collection —
+  `replace 3 "buy oats +shopping"` moves line 3's task into the `shopping`
+  list. Without a token, `replace` keeps the task's list and `add` uses
+  `defaultList`.
+- The routing token is consumed: it never appears in `SUMMARY` or `CATEGORIES`
+  (Nextcloud only sees the task's location, not a duplicate label).
+- `+`-tokens that don't match a configured list stay ordinary project tags.
+- Only the first matching `+List` token routes; remaining ones stay projects.
+
 ## Mapping (todo.txt ↔ VTODO)
 
 | todo.txt | CalDAV VTODO |

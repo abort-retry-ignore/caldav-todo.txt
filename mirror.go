@@ -91,10 +91,22 @@ func newUID() string {
 }
 
 // pull refreshes both mirrors + sidecar from the CalDAV server. Caller holds lock.
+// With autoList enabled, a second REPORT follows any tag-driven rehoming.
 func pull(cl *Client, c *Config, todoFile, doneFile string) (changed bool, err error) {
 	items, err := cl.report()
 	if err != nil {
 		return false, err
+	}
+	items, moved, nerr := normalizeTags(c, cl, items)
+	if nerr != nil {
+		return false, nerr
+	}
+	if moved > 0 {
+		if items2, err2 := cl.report(); err2 == nil {
+			items = items2
+		} else {
+			fmt.Fprintf(stderr(), "tuxedodav: post-normalize REPORT failed: %v\n", err2)
+		}
 	}
 
 	slugByUID := map[string]string{}

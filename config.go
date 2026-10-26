@@ -19,6 +19,7 @@ type Config struct {
 	List        string   `json:"list"`        // single-list mode: collection name
 	Lists       []string `json:"lists"`       // multi-list mode: collections merged into one mirror
 	DefaultList string   `json:"defaultList"` // where tasks without a +list tag go
+	AutoList    bool     `json:"autoList"`    // create a list per tag on the fly
 	TodoFile    string   `json:"todoFile"`    // mirror file the widget reads
 	StateDir    string   `json:"stateDir"`    // sidecar + lock directory
 	Interval    int      `json:"interval"`    // daemon poll seconds
@@ -195,6 +196,15 @@ func initConfig(rest []string) error {
 			return fmt.Errorf("bad --interval %q", s)
 		}
 	}
+	noAuto, _ := get("--no-auto-list")
+	yesAuto, _ := get("--auto-list")
+	c.AutoList = true
+	if noAuto != "" {
+		c.AutoList = false
+	}
+	if yesAuto != "" {
+		c.AutoList = true
+	}
 	if c.Username == "" || c.Password == "" {
 		return fmt.Errorf("init-config requires --user and --password")
 	}
@@ -228,4 +238,36 @@ func initConfig(rest []string) error {
 // slugify turns a collection name into a todo.txt token value.
 func slugify(name string) string {
 	return strings.ReplaceAll(strings.TrimSpace(name), " ", "_")
+}
+
+// autoListEnabled reports whether tag→list normalization runs during pull.
+func (c *Config) autoListEnabled() bool { return c.AutoList }
+
+// persistLists rewrites the config file (callers hold the flock) so that
+// lists created by autoList survive process restarts.
+func persistLists(c *Config, names []string) error {
+	seen := map[string]bool{}
+	for _, e := range c.Lists {
+		seen[e] = true
+	}
+	added := false
+	for _, n := range names {
+		if !seen[n] {
+			c.Lists = append(c.Lists, n)
+			seen[n] = true
+			added = true
+		}
+	}
+	if !added {
+		return nil
+	}
+	p, err := configPath()
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(p, data, 0o600)
 }

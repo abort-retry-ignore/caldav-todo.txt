@@ -68,6 +68,9 @@ func doctor() error {
 		}
 	}
 	fmt.Println("  DELETE ok")
+	if c.autoListEnabled() {
+		fmt.Println("autoList: enabled (a tag on a task creates/moves-to a matching list during sync)")
+	}
 	fmt.Println("doctor: PASS")
 	return nil
 }
