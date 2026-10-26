@@ -1,0 +1,12 @@
+[Unit]
+Description=tuxedodav - keep todo.txt in sync with Nextcloud CalDAV (VTODO)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/tuxedodav sync --interval 60
+Restart=on-failure
+RestartSec=10
+Environment=TUXEDODAV_QUIET=
+
+[Install]
+WantedBy=default.target
