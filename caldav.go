@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -10,21 +9,60 @@ import (
 	"time"
 )
 
-// Client is a minimal CalDAV VTODO client (REPORT/GET/PUT/DELETE).
+// Client is a minimal CalDAV VTODO client (REPORT/GET/PUT/DELETE) over one
+// user's collections (multi-list mode) or a single collection (legacy mode).
 type Client struct {
-	base     string // collection URL with trailing slash
-	username string
-	password string
-	http     *http.Client
+	cols        []Collection
+	defaultSlug string
+	username    string
+	password    string
+	http        *http.Client
 }
 
 func newClient(c *Config) (*Client, error) {
-	base, err := c.collectionURL()
+	cols, err := c.collections()
 	if err != nil {
 		return nil, err
 	}
-	return &Client{base: base, username: c.Username, password: c.Password,
+	dl := c.DefaultList
+	if dl == "" {
+		dl = cols[0].Name
+	}
+	def := slugify(dl)
+	for _, col := range cols {
+		if col.Name == dl {
+			def = col.Slug
+			break
+		}
+	}
+	return &Client{cols: cols, defaultSlug: def, username: c.Username, password: c.Password,
 		http: &http.Client{Timeout: 30 * time.Second}}, nil
+}
+
+func (cl *Client) colBySlug(slug string) (Collection, error) {
+	for _, col := range cl.cols {
+		if col.Slug == slug {
+			return col, nil
+		}
+	}
+	return Collection{}, fmt.Errorf("unknown list %q (configured: %v)", slug, colSlugs(cl.cols))
+}
+
+func (cl *Client) defaultCol() Collection {
+	for _, col := range cl.cols {
+		if col.Slug == cl.defaultSlug {
+			return col
+		}
+	}
+	return cl.cols[0]
+}
+
+func colSlugs(cols []Collection) []string {
+	var out []string
+	for _, col := range cols {
+		out = append(out, col.Slug)
+	}
+	return out
 }
 
 func (cl *Client) do(method, url string, body string, extraHeaders map[string]string) ([]byte, int, error) {
@@ -56,29 +94,49 @@ func (cl *Client) do(method, url string, body string, extraHeaders map[string]st
 }
 
 type item struct {
-	UID  string
-	Href string // absolute URL
-	Etag string
-	ICS  string
-	Task VTodo
+	UID      string
+	Href     string // absolute URL
+	Etag     string
+	ICS      string
+	Task     VTodo
+	ListName string
+	Slug     string
 }
 
-// report runs a calendar-query REPORT for VTODOs in the collection.
+// report runs the VTODO calendar-query REPORT against every collection and
+// aggregates the results.
 func (cl *Client) report() ([]item, error) {
+	var out []item
+	var failures []string
+	for _, col := range cl.cols {
+		items, err := cl.reportCol(col)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", col.Name, err))
+			continue
+		}
+		out = append(out, items...)
+	}
+	if len(failures) == len(cl.cols) && len(cl.cols) > 0 {
+		return nil, fmt.Errorf("all collections failed: %s", strings.Join(failures, "; "))
+	}
+	return out, nil
+}
+
+func (cl *Client) reportCol(col Collection) ([]item, error) {
 	body := `<?xml version="1.0" encoding="utf-8"?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop><d:getetag/><c:calendar-data/></d:prop>
   <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VTODO"/></c:comp-filter></c:filter>
 </c:calendar-query>`
-	data, status, err := cl.do("REPORT", cl.base, body, map[string]string{"Depth": "1"})
+	data, status, err := cl.do("REPORT", col.URL, body, map[string]string{"Depth": "1"})
 	if err != nil {
 		return nil, err
 	}
 	if status == http.StatusNotFound {
-		return nil, fmt.Errorf("collection not found: %s", cl.base)
+		return nil, fmt.Errorf("collection not found: %s", col.URL)
 	}
 	if status != http.StatusMultiStatus {
-		return nil, fmt.Errorf("REPORT %s: HTTP %d: %s", cl.base, status, trunc(data, 300))
+		return nil, fmt.Errorf("REPORT %s: HTTP %d: %s", col.URL, status, trunc(data, 300))
 	}
 	var ms struct {
 		Responses []struct {
@@ -103,7 +161,7 @@ func (cl *Client) report() ([]item, error) {
 			}
 			href := r.Href
 			if !strings.HasPrefix(href, "http") {
-				href = origin(cl.base) + href
+				href = origin(col.URL) + href
 			}
 			href = strings.TrimSuffix(href, "/")
 			t, perr := parseICS(ps.Prop.CalendarData)
@@ -113,7 +171,8 @@ func (cl *Client) report() ([]item, error) {
 			if t.Uid == "" {
 				continue
 			}
-			out = append(out, item{UID: t.Uid, Href: href, Etag: ps.Prop.Getetag, ICS: ps.Prop.CalendarData, Task: *t})
+			out = append(out, item{UID: t.Uid, Href: href, Etag: ps.Prop.Getetag,
+				ICS: ps.Prop.CalendarData, Task: *t, ListName: col.Name, Slug: col.Slug})
 		}
 	}
 	return out, nil
@@ -154,6 +213,11 @@ func (cl *Client) delete(href string) error {
 	return nil
 }
 
+// itemURL builds the object URL for uid inside a collection.
+func (cl *Client) itemURL(col Collection, uid string) string {
+	return strings.TrimSuffix(col.URL, "/") + "/" + uid + ".ics"
+}
+
 // origin returns scheme://host of a URL.
 func origin(u string) string {
 	i := strings.Index(u, "://")
@@ -168,9 +232,19 @@ func origin(u string) string {
 }
 
 func trunc(b []byte, n int) string {
-	s := string(bytes.TrimSpace(b))
+	s := string(b)
+	s = strings.TrimSpace(s)
 	if len(s) > n {
 		s = s[:n] + "…"
 	}
 	return s
+}
+
+// slugSet is the set of configured collection slugs used to route +List tokens.
+func (cl *Client) slugSet() map[string]bool {
+	set := map[string]bool{}
+	for _, s := range colSlugs(cl.cols) {
+		set[s] = true
+	}
+	return set
 }

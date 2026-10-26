@@ -12,14 +12,16 @@ import (
 // Config is the on-disk configuration (~/.config/tuxedodav/config.json).
 // Paths written here may contain "~" which is expanded on load.
 type Config struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	ListURL  string `json:"listURL"`  // full CalDAV collection URL, trailing slash optional
-	Server   string `json:"server"`   // e.g. https://cloud.021407.xyz (used when ListURL empty)
-	List     string `json:"list"`     // collection name inside /calendars/<user>/
-	TodoFile string `json:"todoFile"` // mirror file the widget reads
-	StateDir string `json:"stateDir"` // sidecar + lock directory
-	Interval int    `json:"interval"` // daemon poll seconds
+	Username    string   `json:"username"`
+	Password    string   `json:"password"`
+	Server      string   `json:"server"`      // e.g. https://cloud.021407.xyz
+	ListURL     string   `json:"listURL"`     // single-list mode: full CalDAV collection URL
+	List        string   `json:"list"`        // single-list mode: collection name
+	Lists       []string `json:"lists"`       // multi-list mode: collections merged into one mirror
+	DefaultList string   `json:"defaultList"` // where tasks without a +list tag go
+	TodoFile    string   `json:"todoFile"`    // mirror file the widget reads
+	StateDir    string   `json:"stateDir"`    // sidecar + lock directory
+	Interval    int      `json:"interval"`    // daemon poll seconds
 }
 
 func configPath() (string, error) {
@@ -46,30 +48,61 @@ func loadConfig() (*Config, error) {
 	if c.Username == "" || c.Password == "" {
 		return nil, fmt.Errorf("config missing username/password: %s", p)
 	}
-	if c.ListURL == "" && (c.Server == "" || c.List == "" || c.Username == "") {
-		return nil, fmt.Errorf("config needs listURL or server+list+username")
+	if _, err := c.collections(); err != nil {
+		return nil, err
 	}
 	return &c, nil
 }
 
-// collectionURL resolves the CalDAV collection URL.
-func (c *Config) collectionURL() (string, error) {
-	u := c.ListURL
-	if u == "" {
-		srv := strings.TrimRight(c.Server, "/")
-		if !strings.Contains(srv, "://") {
-			srv = "https://" + srv
+// Collection is one CalDAV calendar participating in the merged mirror.
+type Collection struct {
+	Name string // display name (may contain spaces)
+	Slug string // todo.txt token value: spaces -> "_"
+	URL  string // collection URL with trailing slash
+}
+
+// collections resolves the participating CalDAV collections.
+func (c *Config) collections() ([]Collection, error) {
+	srv := strings.TrimRight(c.Server, "/")
+	if srv != "" && !strings.Contains(srv, "://") {
+		srv = "https://" + srv
+	}
+	mk := func(name string) Collection {
+		return Collection{Name: name, Slug: slugify(name),
+			URL: fmt.Sprintf("%s/remote.php/dav/calendars/%s/%s/", srv, c.Username, url.PathEscape(name))}
+	}
+	var out []Collection
+	seen := map[string]bool{}
+	for _, name := range c.Lists {
+		if name == "" || seen[name] {
+			continue
 		}
-		u = fmt.Sprintf("%s/remote.php/dav/calendars/%s/%s", srv, c.Username, c.List)
+		seen[name] = true
+		out = append(out, mk(name))
 	}
-	u = strings.TrimRight(u, "/") + "/"
-	if _, err := url.Parse(u); err != nil {
-		return "", fmt.Errorf("bad collection URL %q: %w", u, err)
+	if len(out) == 0 {
+		if c.ListURL != "" {
+			name := c.List
+			if name == "" {
+				name = "list"
+			}
+			out = append(out, Collection{Name: name, Slug: slugify(name), URL: strings.TrimRight(c.ListURL, "/") + "/"})
+		} else if c.List != "" {
+			out = append(out, mk(c.List))
+		} else {
+			return nil, fmt.Errorf("config needs lists[] or list/listURL + server")
+		}
 	}
-	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-		return "", fmt.Errorf("collection URL must be http(s), got %q", u)
+	dl := c.DefaultList
+	if dl == "" {
+		dl = out[0].Name
 	}
-	return u, nil
+	for _, col := range out {
+		if col.Name == dl {
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("defaultList %q is not among lists", dl)
 }
 
 // todoAndDoneFiles resolve the mirror paths: TODO_FILE/DONE_FILE env wins
@@ -165,10 +198,23 @@ func initConfig(rest []string) error {
 	if c.Username == "" || c.Password == "" {
 		return fmt.Errorf("init-config requires --user and --password")
 	}
-	if c.ListURL == "" && (c.List == "" || c.Server == "") {
-		return fmt.Errorf("init-config requires --url or --server + --list")
+	if lis, _ := get("--lists"); lis != "" {
+		for _, n := range strings.Split(lis, ",") {
+			if n = strings.TrimSpace(n); n != "" {
+				c.Lists = append(c.Lists, n)
+			}
+		}
 	}
-	if _, err := c.collectionURL(); err != nil {
+	if c.DefaultList, err = get("--default-list"); err != nil {
+		return err
+	}
+	if c.ListURL == "" && c.Server == "" {
+		c.Server = "https://cloud.021407.xyz"
+	}
+	if len(c.Lists) == 0 && c.List == "" && c.ListURL == "" {
+		return fmt.Errorf(`init-config requires --lists "a,b,c" or --list/--url`)
+	}
+	if _, err := c.collections(); err != nil {
 		return err
 	}
 	if err := saveConfig(c); err != nil {
@@ -177,4 +223,9 @@ func initConfig(rest []string) error {
 	p, _ := configPath()
 	fmt.Printf("config written: %s\n", p)
 	return nil
+}
+
+// slugify turns a collection name into a todo.txt token value.
+func slugify(name string) string {
+	return strings.ReplaceAll(strings.TrimSpace(name), " ", "_")
 }

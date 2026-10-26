@@ -16,27 +16,28 @@ func doctor() error {
 	if err != nil {
 		return err
 	}
-	base, _ := c.collectionURL()
-	fmt.Printf("doctor: list = %s\n", base)
+	cols, _ := c.collections()
+	fmt.Printf("doctor: lists = %v (default: %s)\n", colSlugs(cl.cols), cl.defaultCol().Slug)
 
-	items, err := cl.report()
-	if err != nil {
-		return fmt.Errorf("REPORT failed: %w", err)
+	for _, col := range cols {
+		items, err := cl.reportCol(col)
+		if err != nil {
+			return fmt.Errorf("REPORT %s failed: %w", col.Name, err)
+		}
+		fmt.Printf("  %-12s REPORT ok, %d VTODOs\n", col.Name, len(items))
 	}
-	fmt.Printf("  REPORT ok, %d VTODOs currently\n", len(items))
-
+	col := cl.defaultCol()
 	uid := "tuxedodav-doctor-" + fmt.Sprintf("%d", time.Now().UnixNano())
 	test := VTodo{Uid: uid, Summary: "tuxedodav doctor test \\, ; , \\ task", Priority: 5, Due: today(), Categories: []string{"+doctor", "@dell"}, Created: today()}
-	href := trimSlash(base) + "/" + uid + ".ics"
+	href := cl.itemURL(col, uid)
+	_ = href
+	fmt.Printf("  round-trip in %s...\n", col.Name)
 	if err := cl.put(href, writeICS(test)); err != nil {
 		return fmt.Errorf("PUT failed: %w", err)
 	}
 	fmt.Printf("  PUT ok (%s)\n", href)
 
-	items, err = cl.report()
-	if err != nil {
-		return fmt.Errorf("REPORT after PUT failed: %w", err)
-	}
+	items, err := cl.reportCol(col)
 	var found *item
 	for i := range items {
 		if items[i].UID == uid {
@@ -60,8 +61,8 @@ func doctor() error {
 	if err := cl.delete(href); err != nil {
 		return fmt.Errorf("DELETE failed: %w", err)
 	}
-	items, _ = cl.report()
-	for _, it := range items {
+	items2, _ := cl.reportCol(col)
+	for _, it := range items2 {
 		if it.UID == uid {
 			return fmt.Errorf("deleted task still visible in REPORT")
 		}

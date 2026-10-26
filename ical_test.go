@@ -7,12 +7,19 @@ import (
 
 func roundTripLine(t *testing.T, line string) (VTodo, string) {
 	t.Helper()
+	return roundTripLineWithLists(t, line, nil)
+}
+
+func roundTripLineWithLists(t *testing.T, line string, slugs map[string]bool) (VTodo, string) {
+	t.Helper()
 	done, comp, prio, created, tokens, err := parseLine(line)
 	if err != nil {
 		t.Fatalf("parseLine(%q): %v", line, err)
 	}
+	slug, tokens := splitListToken(tokens, slugs)
 	task := taskFromParsedLine(done, comp, prio, created, tokens, nil)
-	return task, lineFromTask(task)
+	_ = slug
+	return task, lineFromTask(task, "")
 }
 
 func TestRoundTripBasic(t *testing.T) {
@@ -78,8 +85,8 @@ func TestCategorysWithComma(t *testing.T) {
 	if parsed.Due != "2026-11-03" {
 		t.Errorf("due = %q", parsed.Due)
 	}
-	if !strings.Contains(lineFromTask(*parsed), "+a,b @c due:2026-11-03") {
-		t.Errorf("line = %q", lineFromTask(*parsed))
+	if !strings.Contains(lineFromTask(*parsed, ""), "+a,b @c due:2026-11-03") {
+		t.Errorf("line = %q", lineFromTask(*parsed, ""))
 	}
 }
 
@@ -120,5 +127,50 @@ func TestParseTokensTypes(t *testing.T) {
 	_ = want
 	if !strings.Contains(got, "context:phone") || !strings.Contains(got, "project:bank") || !strings.Contains(got, "due:2026-01-31") {
 		t.Errorf("tokens = %v", got)
+	}
+}
+
+func TestListTokenRouting(t *testing.T) {
+	line := "(B) buy oats +shopping @pantry due:2026-11-02"
+	done, comp, prio, created, tokens, err := parseLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug, rest := splitListToken(tokens, map[string]bool{"shopping": true, "dell": true})
+	if slug != "shopping" {
+		t.Fatalf("slug = %q", slug)
+	}
+	task := taskFromParsedLine(done, comp, prio, created, rest, nil)
+	if task.Summary != "buy oats" {
+		t.Errorf("summary = %q", task.Summary)
+	}
+	if len(task.Categories) != 1 || task.Categories[0] != "@pantry" {
+		t.Errorf("categories = %v (list token must not leak into labels)", task.Categories)
+	}
+	out := lineFromTask(task, slug)
+	if out != "(B) buy oats +shopping @pantry due:2026-11-02" {
+		t.Errorf("line = %q", out)
+	}
+}
+
+func TestListTokenUnknownSlugStaysAProject(t *testing.T) {
+	tokens := parseTokens("+notalist stuff")
+	slug, rest := splitListToken(tokens, map[string]bool{"shopping": true})
+	if slug != "" {
+		t.Errorf("unknown +token must not route: slug=%q", slug)
+	}
+	if len(rest) != 2 {
+		t.Errorf("rest = %v", rest)
+	}
+}
+
+func TestListTokenOnlyFirstConsumed(t *testing.T) {
+	tokens := parseTokens("x +shopping +dell")
+	slug, rest := splitListToken(tokens, map[string]bool{"shopping": true, "dell": true})
+	if slug != "shopping" {
+		t.Errorf("slug = %q", slug)
+	}
+	if len(rest) != 2 || rest[0].Kind != "word" || rest[1].Kind != "project" || rest[1].Value != "dell" {
+		t.Errorf("second +token must stay a project, got %v", rest)
 	}
 }

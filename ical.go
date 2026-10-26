@@ -98,9 +98,27 @@ func summaryFromTokens(tokens []Token) string {
 	return strings.Join(words, " ")
 }
 
-// lineFromTask renders a todo.txt line from a VTodo.
-// Canonical order: [x <comp>] [(P)] [<created>] words... +proj @ctx due:date
-func lineFromTask(t VTodo) string {
+// splitListToken separates the list-routing token (+List matching a configured
+// collection slug) from the remaining tokens. list tokens are consumed: they
+// decide which CalDAV collection a task lives in and are never written to
+// SUMMARY or CATEGORIES. Returns "" when no routing token was present.
+func splitListToken(tokens []Token, slugs map[string]bool) (string, []Token) {
+	var rest []Token
+	slug := ""
+	for _, t := range tokens {
+		if t.Kind == "project" && slugs[t.Value] && slug == "" {
+			slug = t.Value
+			continue
+		}
+		rest = append(rest, t)
+	}
+	return slug, rest
+}
+
+// lineFromTask renders a todo.txt line from a VTodo, tagging it with its
+// source list slug. Canonical order: [x <comp>] [(P)] [<created>] words...
+// +list +proj @ctx due:date
+func lineFromTask(t VTodo, slug string) string {
 	var b strings.Builder
 	if t.Completed != "" {
 		b.WriteString("x " + t.Completed + " ")
@@ -112,6 +130,9 @@ func lineFromTask(t VTodo) string {
 		b.WriteString(t.Created + " ")
 	}
 	b.WriteString(t.Summary)
+	if slug != "" {
+		b.WriteString(" +" + slug)
+	}
 	for _, cat := range t.Categories {
 		if strings.HasPrefix(cat, "+") {
 			b.WriteString(" " + cat)

@@ -39,14 +39,21 @@ func cmdAdd(line string) error {
 		if perr != nil {
 			return perr
 		}
+		slug, tokens := splitListToken(tokens, cl.slugSet())
+		if slug == "" {
+			slug = cl.defaultSlug
+		}
 		if created == "" {
 			created = today()
 		}
 		uid := newUID()
 		t := taskFromParsedLine(done, comp, prio, created, tokens, nil)
 		t.Uid = uid
-		href := strings.TrimSuffix(cl.base, "/") + "/" + uid + ".ics"
-		if perr := cl.put(href, writeICS(t)); perr != nil {
+		col, cerr := cl.colBySlug(slug)
+		if cerr != nil {
+			return cerr
+		}
+		if perr := cl.put(cl.itemURL(col, uid), writeICS(t)); perr != nil {
 			return perr
 		}
 		if _, rerr := pull(cl, c, todoFile, doneFile); rerr != nil {
@@ -163,6 +170,17 @@ func cmdReplace(n int, newline string) error {
 		if perr != nil {
 			return perr
 		}
+		slug, tokens := splitListToken(tokens, cl.slugSet())
+		// a new +List token moves the task between collections; without one
+		// the task stays where it is
+		hrefNew := href
+		if slug != "" && slug != slugOf(href, cl) {
+			col, cerr := cl.colBySlug(slug)
+			if cerr != nil {
+				return cerr
+			}
+			hrefNew = cl.itemURL(col, cur.Uid)
+		}
 		// preserve server-side fields the line syntax cannot express
 		if created == "" {
 			created = cur.Created
@@ -172,8 +190,13 @@ func cmdReplace(n int, newline string) error {
 		if !done {
 			nt.Completed = ""
 		}
-		if perr := cl.put(href, writeICS(nt)); perr != nil {
+		if perr := cl.put(hrefNew, writeICS(nt)); perr != nil {
 			return perr
+		}
+		if hrefNew != href {
+			if derr := cl.delete(href); derr != nil {
+				return derr
+			}
 		}
 		if _, rerr := pull(cl, c, todoFile, doneFile); rerr != nil {
 			return rerr
@@ -181,6 +204,23 @@ func cmdReplace(n int, newline string) error {
 		say("replaced", strconv.Itoa(n))
 		return nil
 	})
+}
+
+// slugOf finds which configured collection an object href lives in.
+func slugOf(href string, cl *Client) string {
+	for _, col := range cl.cols {
+		if strings.Contains(href, "/"+col.Name+"/") ||
+			strings.HasSuffix(strings.TrimSuffix(href, "/"), col.Slug) {
+			// match by URL prefix of the collection directory
+		}
+	}
+	for _, col := range cl.cols {
+		prefix := strings.TrimSuffix(col.URL, "/") + "/"
+		if strings.HasPrefix(href, prefix) {
+			return col.Slug
+		}
+	}
+	return ""
 }
 
 func syncOnce() error {
@@ -214,7 +254,7 @@ func runDaemon(interval int) error {
 	if _, err := c.ensureStateDir(); err != nil {
 		return err
 	}
-	fmt.Fprintf(stderr(), "tuxedodav daemon: %s (+done.txt) <- %s every %ds\n", todoFile, cl.base, interval)
+	fmt.Fprintf(stderr(), "tuxedodav daemon: %s (+done.txt) <- %s every %ds\n", todoFile, strings.Join(colSlugs(cl.cols), ","), interval)
 	for {
 		var changed bool
 		_ = c.lockFile(func() error {

@@ -97,9 +97,11 @@ func pull(cl *Client, c *Config, todoFile, doneFile string) (changed bool, err e
 		return false, err
 	}
 
+	slugByUID := map[string]string{}
 	var open []VTodo
 	var doneList []VTodo
 	for _, it := range items {
+		slugByUID[it.UID] = it.Slug
 		t := it.Task
 		if t.Completed != "" {
 			doneList = append(doneList, t)
@@ -119,7 +121,7 @@ func pull(cl *Client, c *Config, todoFile, doneFile string) (changed bool, err e
 	todoLines := make([]string, 0, len(open))
 	side := sidecar{}
 	for _, t := range open {
-		todoLines = append(todoLines, lineFromTask(t))
+		todoLines = append(todoLines, lineFromTask(t, slugByUID[t.Uid]))
 		side.Entries = append(side.Entries, struct {
 			UID  string `json:"uid"`
 			Href string `json:"href"`
@@ -127,7 +129,7 @@ func pull(cl *Client, c *Config, todoFile, doneFile string) (changed bool, err e
 	}
 	doneLines := make([]string, 0, len(doneList))
 	for _, t := range doneList {
-		doneLines = append(doneLines, lineFromTask(t))
+		doneLines = append(doneLines, lineFromTask(t, slugByUID[t.Uid]))
 	}
 
 	todoStr := ""
