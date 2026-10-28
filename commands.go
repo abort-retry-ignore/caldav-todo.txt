@@ -34,7 +34,7 @@ func cmdAdd(line string) error {
 		return err
 	}
 	todoFile, doneFile := c.todoAndDoneFiles()
-	return c.lockFile(func() error {
+	return c.lockTry(15*time.Second, func() error {
 		done, comp, prio, created, tokens, perr := parseLine(line)
 		if perr != nil {
 			return perr
@@ -82,7 +82,8 @@ func applyToLines(c *Config, cl *Client, todoFile, doneFile string, nums []int, 
 				return perr
 			}
 			if _, rerr := pull(cl, c, todoFile, doneFile); rerr != nil {
-				return rerr
+				say(action, strconv.Itoa(n), "(mirror refresh pending)")
+				return nil
 			}
 			say(action, strconv.Itoa(n))
 			return nil
@@ -123,7 +124,7 @@ func cmdDel(nums []int) error {
 	}
 	todoFile, doneFile := c.todoAndDoneFiles()
 	for _, n := range nums {
-		err := c.lockFile(func() error {
+		err := c.lockTry(15*time.Second, func() error {
 			_, href, rerr := resolveLine(c, todoFile, n)
 			if rerr != nil {
 				return rerr
@@ -132,7 +133,8 @@ func cmdDel(nums []int) error {
 				return rerr
 			}
 			if _, rerr := pull(cl, c, todoFile, doneFile); rerr != nil {
-				return rerr
+				say("deleted", strconv.Itoa(n), "(mirror refresh pending)")
+				return nil
 			}
 			say("deleted", strconv.Itoa(n))
 			return nil
@@ -157,7 +159,7 @@ func cmdReplace(n int, newline string) error {
 		return err
 	}
 	todoFile, doneFile := c.todoAndDoneFiles()
-	return c.lockFile(func() error {
+	return c.lockTry(15*time.Second, func() error {
 		_, href, rerr := resolveLine(c, todoFile, n)
 		if rerr != nil {
 			return rerr

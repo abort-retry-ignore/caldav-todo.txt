@@ -37,7 +37,7 @@ func newClient(c *Config) (*Client, error) {
 		}
 	}
 	cl := &Client{cols: cols, defaultSlug: def, username: c.Username, password: c.Password,
-		http: &http.Client{Timeout: 30 * time.Second}, userPath: fmt.Sprintf("/remote.php/dav/calendars/%s/", c.Username)}
+		http: &http.Client{Timeout: 15 * time.Second}, userPath: fmt.Sprintf("/remote.php/dav/calendars/%s/", c.Username)}
 	// Discovery: include every VTODO-capable calendar in the account, not just
 	// the ones named in the config — newly created lists never fall out of view.
 	if derr := cl.discover(); derr != nil {

@@ -62,21 +62,71 @@ func parseLine(line string) (done bool, compDate, prio, createdDate string, toke
 }
 
 // parseTokens classifies whitespace-separated words of a line body.
+// Due tokens accept "due:<date>", "due:<weekday>" (next occurrence),
+// and the two-token forms ":due <date|weekday>" / "due <date|weekday>".
 func parseTokens(s string) []Token {
 	var out []Token
-	for _, w := range strings.Fields(s) {
+	words := strings.Fields(s)
+	for i := 0; i < len(words); i++ {
+		w := words[i]
+		if strings.HasPrefix(w, "due:") && len(w) > 4 {
+			if d, ok := resolveDue(w[4:]); ok {
+				out = append(out, Token{"due", d})
+				continue
+			}
+		}
+		if (w == "due" || w == ":due") && i+1 < len(words) {
+			if d, ok := resolveDue(words[i+1]); ok {
+				out = append(out, Token{"due", d})
+				i++
+				continue
+			}
+		}
 		switch {
 		case len(w) > 1 && strings.HasPrefix(w, "+") && !strings.Contains(w[1:], "+"):
 			out = append(out, Token{"project", w[1:]})
 		case len(w) > 1 && strings.HasPrefix(w, "@"):
 			out = append(out, Token{"context", w[1:]})
-		case strings.HasPrefix(w, "due:") && isDate(w[4:]):
-			out = append(out, Token{"due", w[4:]})
 		default:
 			out = append(out, Token{"word", w})
 		}
 	}
 	return out
+}
+
+// resolveDue turns a token into a real date: explicit YYYY-MM-DD, or the
+// next occurrence of a weekday, or today/tomorrow.
+func resolveDue(v string) (string, bool) {
+	if isDate(v) {
+		return v, true
+	}
+	switch strings.ToLower(v) {
+	case "today":
+		return today(), true
+	case "tomorrow":
+		return time.Now().AddDate(0, 0, 1).Format("2006-01-02"), true
+	}
+	if wd, ok := parseWeekday(v); ok {
+		now := time.Now()
+		offset := (int(wd) - int(now.Weekday()) + 7) % 7 // today counts as today
+		return now.AddDate(0, 0, offset).Format("2006-01-02"), true
+	}
+	return "", false
+}
+
+// parseWeekday accepts full and 3-letter English weekday names.
+func parseWeekday(s string) (time.Weekday, bool) {
+	names := map[string]time.Weekday{}
+	for d, n := range map[time.Weekday]string{
+		time.Sunday: "sunday", time.Monday: "monday", time.Tuesday: "tuesday",
+		time.Wednesday: "wednesday", time.Thursday: "thursday",
+		time.Friday: "friday", time.Saturday: "saturday",
+	} {
+		names[n] = d
+		names[n[:3]] = d
+	}
+	wd, ok := names[strings.ToLower(strings.TrimSpace(s))]
+	return wd, ok
 }
 
 func isDate(s string) bool {

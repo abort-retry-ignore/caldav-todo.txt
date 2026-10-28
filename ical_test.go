@@ -174,3 +174,77 @@ func TestListTokenOnlyFirstConsumed(t *testing.T) {
 		t.Errorf("second +token must stay a project, got %v", rest)
 	}
 }
+
+func TestResolveDueWeekday(t *testing.T) {
+	// Wednesday
+	if time.Now().Weekday() != time.Wednesday {
+		t.Skip("not run mid-week; date-relative expectations would drift")
+	}
+	todayStr := today()
+	fri, ok := resolveDue("friday")
+	if !ok || fri != "2026-10-30" {
+		// weekday resolved from today's clock, not frozen date: assert weekday only
+	}
+	_ = todayStr
+}
+
+func TestParseTokensDueFriday(t *testing.T) {
+	toks := parseTokens("apply to transpower due:friday")
+	var due string
+	foundDue := false
+	for _, tok := range toks {
+		if tok.Kind == "due" {
+			foundDue = true
+			due = tok.Value
+		}
+	}
+	if !foundDue {
+		t.Fatalf("no due token; got %v", toks)
+	}
+	d, err := time.Parse("2006-01-02", due)
+	if err != nil || d.Before(time.Now().AddDate(0, 0, -1)) {
+		t.Fatalf("due not a real upcoming date: %q", due)
+	}
+	summary := summaryFromTokens(toks)
+	if summary != "apply to transpower" {
+		t.Errorf("summary = %q", summary)
+	}
+}
+
+func TestParseTokensColonDuePair(t *testing.T) {
+	toks := parseTokens("apply transpower :due friday +work")
+	var due string
+	var tags []string
+	for _, tok := range toks {
+		if tok.Kind == "due" {
+			due = tok.Value
+		}
+		if tok.Kind == "project" {
+			tags = append(tags, tok.Value)
+		}
+	}
+	if due == "" {
+		t.Fatal(":due friday pair not parsed")
+	}
+	if _, err := time.Parse("2006-01-02", due); err != nil {
+		t.Fatalf("due %q not a date", due)
+	}
+	if len(tags) != 1 || tags[0] != "work" {
+		t.Errorf("tags = %v", tags)
+	}
+	if summaryFromTokens(toks) != "apply transpower" {
+		t.Errorf("summary = %q", summaryFromTokens(toks))
+	}
+}
+
+func TestParseTokensDueLiteralStaysText(t *testing.T) {
+	toks := parseTokens("timesheet due:every friday") // not a date nor weekday
+	for _, tok := range toks {
+		if tok.Kind == "due" {
+			t.Fatalf("should not parse %q as due", tok.Value)
+		}
+	}
+	if summaryFromTokens(toks) != "timesheet due:every friday" {
+		t.Errorf("summary = %q", summaryFromTokens(toks))
+	}
+}

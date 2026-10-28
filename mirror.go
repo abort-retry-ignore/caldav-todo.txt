@@ -266,3 +266,30 @@ func fileLines(path string) ([]string, error) {
 }
 
 func splitLines(s string) []string { return strings.Split(s, "\n") }
+
+// lockTry acquires the flock non-blockingly for up to d, used by verbs so a
+// wedged sync can't hang an edit forever.
+func (c *Config) lockTry(d time.Duration, f func() error) error {
+	dir, err := c.ensureStateDir()
+	if err != nil {
+		return err
+	}
+	lf, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lf.Close()
+	deadline := time.Now().Add(d)
+	for {
+		err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("sync busy; try again (mirror refresh runs on next tick)")
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	defer syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	return f()
+}
