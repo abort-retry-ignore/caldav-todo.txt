@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func roundTripLine(t *testing.T, line string) (VTodo, string) {
