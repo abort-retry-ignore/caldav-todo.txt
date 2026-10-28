@@ -40,6 +40,9 @@ widget / editor (reads todo.txt, watches for changes)
 - **Safe iCalendar handling**: proper TEXT escaping, line folding, RFC-compliant
   `CREATED`/`COMPLETED` (DATE-TIME), `DUE;VALUE=DATE`, `CATEGORIES` with commas
   — all covered by round-trip unit tests.
+- **Resilient verbs**: edits use a non-blocking lock with a deadline, 15s HTTP
+  timeouts, and best-effort mirror refresh — a server hiccup surfaces as
+  "try again (mirror refresh pending)", not a hang.
 - **No lost edits**: every verb and the daemon share a `flock`; mirror writes
   are atomic (write+rename); line numbers map to objects through a refreshed
   UID sidecar.
@@ -54,7 +57,8 @@ widget / editor (reads todo.txt, watches for changes)
 | `+project`, `@context` | `CATEGORIES` labels, written with the prefix (`+home`, `@shop`) |
 | `+List` matching a configured/known list | **routing**: which collection the task lives in |
 | any other tag (via `autoList`) | a CalDAV list named after the tag |
-| `due:YYYY-MM-DD` | `DUE;VALUE=DATE` |
+| `due:YYYY-MM-DD`, `due:friday`, `due:tomorrow` | `DUE;VALUE=DATE` (weekdays resolve to the next occurrence) |
+| `:due friday` / `due friday` (two-token forms) | same |
 | `(A)` / `(B)` / `(C)` | `PRIORITY` 1 / 5 / 9 |
 | leading `YYYY-MM-DD` | `CREATED` (added if missing) |
 | `x YYYY-MM-DD`, done.txt | `STATUS:COMPLETED` + `COMPLETED` |
